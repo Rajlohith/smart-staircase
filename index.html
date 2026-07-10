@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Musical Staircase — Digital Twin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0d13">
+<meta name="description" content="Live 3D digital twin of a step-triggered LED & audio musical staircase.">
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icons/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="scene"></div>
+
+<div class="hud panel" id="title">
+  <span class="eyebrow">Digital Twin · Live Simulation</span>
+  <h1>Musical Staircase</h1>
+  <p>Step-triggered LED &amp; audio staircase, mirrored from the physical rig. Click any tread to simulate a footstep.</p>
+</div>
+
+<div class="hud panel" id="controls">
+  <h2>Announce mode</h2>
+  <div id="modeToggle">
+    <button id="modeNumbers" class="active" type="button">🔢 Numbers</button>
+    <button id="modeMusic" type="button">🎵 Musical stairs</button>
+  </div>
+
+  <h2>Simulate</h2>
+  <button id="btnSequence">▶ Play full sequence</button>
+  <button id="btnRandom" class="secondary">🎲 Random footstep</button>
+
+  <p style="margin-top:2px;">Drag to orbit · scroll to zoom</p>
+</div>
+
+<div class="hud panel" id="physical">
+  <h2>Physical Rig Link</h2>
+  <div class="statusRow"><span class="statusDot" id="physicalDot"></span><span id="physicalStatusText">Not connected</span></div>
+  <input id="physicalIp" type="text" placeholder="ESP32 IP or wss:// relay URL" autocomplete="off" spellcheck="false">
+  <button id="btnPhysicalConnect">Connect</button>
+  <p style="margin:6px 0 0 0; font-size:11px; color:var(--muted); line-height:1.5;">Live data overrides the simulate buttons. Step 1 = blue (LDR1), Step 2 = red (LDR2), Step 3 = white (LDR3). Step 3's door opens via servo when its beam breaks.</p>
+</div>
+
+<div class="hud panel" id="legend">
+  <h2>Components</h2>
+  <div class="row"><span class="dot" style="background:#21e6c1;box-shadow:0 0 6px #21e6c1;"></span>WS2812B LED strip (per riser)</div>
+  <div class="row"><span class="dot" style="background:#3a6bd9;"></span>LDR receiver module (left side, every step)</div>
+  <div class="row"><span class="dot" style="background:#d4a24c;"></span>Laser transmitter (right side, every step)</div>
+  <div class="row"><span class="dot" style="background:#ff3b3b;"></span>Laser trip-beam (blocked by Spiderman when broken)</div>
+  <div class="row"><span class="dot" style="background:#c81f1f;"></span>Spiderman beam-blocker (sits at the welcome landing when idle)</div>
+  <div class="row"><span class="dot" style="background:#151515;border:1px solid #444;"></span>Speaker (left wall, beside step 2)</div>
+  <div class="row"><span class="dot" style="background:#ffd98a;box-shadow:0 0 6px #ffd98a;"></span>Welcome light (always on, at entrance)</div>
+  <div class="row"><span class="dot" style="background:#21e6c1;box-shadow:0 0 6px #21e6c1;"></span>Idle glow · Strip 6 (on by default, dims while a step is active)</div>
+  <div class="row"><span class="dot" style="background:#7a5230;"></span>Door + servo (top of step 3, servo centered on back)</div>
+</div>
+
+<div class="hud panel" id="log">
+  <h2>Sensor / event log</h2>
+  <div id="logList"></div>
+</div>
+
+<div class="hud" id="hint">click a step to begin</div>
+
+<button id="installBtn" class="panel" type="button">⬇ Install app</button>
+
+<script src="three.min.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
