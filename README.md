@@ -5,6 +5,19 @@ with an optional live link to the physical ESP32/Arduino rig.
 
 ## What changed in this pass
 
+- **Two-way link (virtual ⇄ real)** — the link was previously receive-only
+  (rig → browser). The "Physical Rig Link" panel now has **Open door /
+  Close door / Auto (sensor)** buttons: clicking them sends a command over
+  the same WebSocket to the ESP32, which moves the real SG90 servo directly,
+  overriding the beam sensor until you hit "Auto" again. The ESP32 now also
+  reports the door's real state (`door`, `doorMode`) in every broadcast, on a
+  150ms timer, so the 3D door always mirrors what's actually happening on
+  the rig — whether it moved from your click, the beam sensor, or someone
+  else's browser. Both `esp32_bridge_lan.ino` and `esp32_bridge_cloud.ino`
+  (and the Render relay in `server/`) got matching updates; the frontend
+  falls back to the old ldr3-only behavior automatically if it's still
+  talking to a rig on the older, receive-only firmware. See "Two-way link"
+  below for the message format and wiring details.
 - **Spiderman beam-blocker** — a small chibi Spiderman model (styled off your
   keychain photos, no keyring/chain) now sits wherever a laser beam is
   currently broken, so the beam looks like it's being physically blocked
@@ -48,7 +61,7 @@ digital-twin/
 │   ├── spiderman.js             # the beam-blocker model + placement logic
 │   ├── audio.js                 # tones, speech, numbers/music toggle
 │   ├── ui-log.js                  # sensor/event log panel
-│   ├── network.js                  # WebSocket link to the physical rig
+│   ├── network.js                  # two-way WebSocket link to the physical rig
 │   ├── ui.js                        # button wiring, install prompt
 │   └── main.js                       # entry point / render loop
 ├── assets/icons/              # PWA icons (192px, 512px)
@@ -110,7 +123,45 @@ internet.
 
 ---
 
-## 3. Hosting online — architecture
+## 3. Two-way link — how it works
+
+Before this pass, data only flowed one direction: `Uno → ESP32 → browser`.
+Now the browser can send commands back down the same link, and the ESP32
+reports real door state back up:
+
+```
+Browser  --{"cmd":"door_open"}-->  ESP32  --moves real SG90 servo
+Browser  <--{..sensors, door:"opening", doorMode:"manual"}--  ESP32
+```
+
+- **Commands** (browser → rig): `{"cmd":"door_open"}`, `{"cmd":"door_close"}`,
+  `{"cmd":"door_auto"}`. Sent as plain WebSocket text frames on the exact
+  same connection used for telemetry — no separate socket needed. `door_open`
+  / `door_close` put the door in **manual** mode (the beam sensor is ignored
+  until you send `door_auto`, which hands control back to LDR3).
+- **Telemetry** (rig → browser): the existing `{ldr1, ldr2, ldr3, strip5,
+  strip6, strip7, strip9, speaker}` frame now also carries `door` (one of
+  `"closed" | "opening" | "open" | "closing"`, tracking the real servo sweep
+  timing) and `doorMode` (`"auto" | "manual"`). This is sent both right after
+  a new line from the Uno *and* on a 150ms timer, so a door move you trigger
+  with no new sensor data still gets reported back quickly.
+- **Only the door is remote-controllable right now** — it's the one actuator
+  the ESP32 drives independently of the Uno (LEDs/speaker are driven
+  straight off the Uno's own sensor reads, and the Uno sketch is intentionally
+  left unchanged). Extending this pattern to other actuators would mean
+  adding a return serial channel from the ESP32 to the Uno, which is a
+  bigger change to the physical wiring/firmware than this pass makes.
+- **Cloud mode** works the same way: the relay (`server/server.js`) now
+  forwards any `{"cmd":...}` a browser sends on `/ws` straight through to
+  whichever ESP32 is currently connected on `/esp32`, so remote control
+  works from anywhere the site is hosted, not just on the same LAN.
+- **Backwards compatible**: if `door` isn't present in a telemetry frame
+  (i.e. you haven't reflashed the ESP32 yet), the frontend quietly falls
+  back to the old behavior of inferring open/close purely from `ldr3`.
+
+---
+
+## 4. Hosting online — architecture
 
 **Why not just Firebase alone, or just Render alone?** The frontend is a
 static site (Firebase Hosting is perfect and free for that). But the ESP32
@@ -192,7 +243,7 @@ if you want the least amount of configuration.
 
 ---
 
-## 4. PWA — install on mobile
+## 5. PWA — install on mobile
 
 Once the site is hosted (Firebase, Render, or even `serve_offline.py` on
 your own WiFi), open it in Chrome/Safari on your phone:
@@ -209,7 +260,7 @@ PWA (the 3D app itself works fine either way).
 
 ---
 
-## 5. Customizing the Spiderman model or its behavior
+## 6. Customizing the Spiderman model or its behavior
 
 - Look/pose: `js/spiderman.js` — it's built entirely from primitive
   geometries + two small canvas textures (a web pattern for the head, a

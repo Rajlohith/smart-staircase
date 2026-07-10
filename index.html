@@ -42,6 +42,14 @@
   <input id="physicalIp" type="text" placeholder="ESP32 IP or wss:// relay URL" autocomplete="off" spellcheck="false">
   <button id="btnPhysicalConnect">Connect</button>
   <p style="margin:6px 0 0 0; font-size:11px; color:var(--muted); line-height:1.5;">Live data overrides the simulate buttons. Step 1 = blue (LDR1), Step 2 = red (LDR2), Step 3 = white (LDR3). Step 3's door opens via servo when its beam breaks.</p>
+
+  <h2 style="margin-top:10px;">Door control (virtual → real)</h2>
+  <div id="doorControls">
+    <button id="btnDoorOpen" disabled>🔓 Open door</button>
+    <button id="btnDoorClose" class="secondary" disabled>🔒 Close door</button>
+    <button id="btnDoorAuto" class="secondary" disabled>↺ Auto (sensor)</button>
+  </div>
+  <p style="margin:6px 0 0 0; font-size:11px; color:var(--muted); line-height:1.5;">Mode: <span id="doorModeText">—</span>. These buttons move the physical SG90 servo directly; the door shown here always mirrors what the rig reports back, whether it moved from a command, the beam sensor, or another connected browser.</p>
 </div>
 
 <div class="hud panel" id="legend">

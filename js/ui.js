@@ -1,4 +1,4 @@
-import { connectPhysical } from './network.js';
+import { connectPhysical, sendDoorCommand } from './network.js';
 import { setAnnounceMode } from './audio.js';
 
 export function initModeToggle(){
@@ -16,6 +16,17 @@ export function initModeToggle(){
 
 export function initPhysicalLink(){
   document.getElementById('btnPhysicalConnect').addEventListener('click', connectPhysical);
+}
+
+// ---------------------------------------------------------------
+// VIRTUAL → REAL door control (two-way link)
+// Buttons start disabled and are only enabled once network.js confirms a
+// live WebSocket connection to the rig (see setDoorButtonsEnabled there).
+// ---------------------------------------------------------------
+export function initDoorControls(){
+  document.getElementById('btnDoorOpen').addEventListener('click', ()=> sendDoorCommand('door_open'));
+  document.getElementById('btnDoorClose').addEventListener('click', ()=> sendDoorCommand('door_close'));
+  document.getElementById('btnDoorAuto').addEventListener('click', ()=> sendDoorCommand('door_auto'));
 }
 
 // ---------------------------------------------------------------

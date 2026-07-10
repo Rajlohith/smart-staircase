@@ -22,6 +22,10 @@ let wsReconnectTimer = null;
 export let physicalConnected = false;
 export let physicalData = null;
 
+// Last door category we animated for ("open" or "closed"), so repeated
+// telemetry frames with the same door state don't restart the sweep anim.
+let prevDoorCategory = 'closed';
+
 function setPhysicalStatus(state, text){
   const dot = document.getElementById('physicalDot');
   const label = document.getElementById('physicalStatusText');
@@ -54,8 +58,10 @@ export function connectPhysical(){
 
   ws.onopen = () => {
     physicalConnected = true;
+    prevDoorCategory = 'closed';
     setPhysicalStatus('connected','Connected to rig');
     logRaw('LINK · connected to ' + ip);
+    setDoorButtonsEnabled(true);
   };
 
   ws.onmessage = (evt) => {
@@ -69,9 +75,25 @@ export function connectPhysical(){
     if(data.ldr2 && !prevPhysical.ldr2) announceStep(1);
     if(data.ldr3 && !prevPhysical.ldr3) announceStep(2);
 
-    // Door/servo: opens the instant step 3's beam breaks, closes 2s after it clears
-    if(data.ldr3 && !prevPhysical.ldr3) openDoor();
-    if(!data.ldr3 && prevPhysical.ldr3) scheduleCloseDoor(2000);
+    // Door/servo sync — TWO-WAY: if the rig reports its own door state (new
+    // firmware), trust that as ground truth instead of re-deriving it from
+    // ldr3, because the door can now also be moved remotely by a command
+    // (see sendDoorCommand below), or by another connected browser, not just
+    // by the beam sensor.
+    if(data.door){
+      const openish = data.door === 'open' || data.door === 'opening';
+      const category = openish ? 'open' : 'closed';
+      if(category !== prevDoorCategory){
+        if(openish) openDoor(); else scheduleCloseDoor(0);
+        prevDoorCategory = category;
+      }
+      updateDoorModeUI(data.doorMode);
+    } else {
+      // Legacy fallback for rigs still running the older, receive-only
+      // firmware that never sends a "door" field.
+      if(data.ldr3 && !prevPhysical.ldr3) openDoor();
+      if(!data.ldr3 && prevPhysical.ldr3) scheduleCloseDoor(2000);
+    }
 
     // Log EVERY sensor and actuator field the instant it changes state.
     Object.keys(FIELD_INFO).forEach(key=>{
@@ -95,8 +117,39 @@ export function connectPhysical(){
     physicalData = null;
     setPhysicalStatus('error','Disconnected — retrying…');
     logRaw('LINK · disconnected, retrying…');
+    setDoorButtonsEnabled(false);
     wsReconnectTimer = setTimeout(connectPhysical, 2000);
   };
+}
+
+// ---------------------------------------------------------------
+// VIRTUAL → REAL: send a command back down the same link the telemetry
+// came up on. The ESP32 (both LAN and cloud-relay firmware) understands
+// {"cmd":"door_open"|"door_close"|"door_auto"} and moves the real SG90.
+// ---------------------------------------------------------------
+export function sendDoorCommand(cmd){
+  if(!ws || ws.readyState !== WebSocket.OPEN){
+    logRaw('LINK · not connected — command "' + cmd + '" not sent');
+    return;
+  }
+  ws.send(JSON.stringify({ cmd }));
+  logRaw('CMD → rig · ' + cmd);
+}
+
+function setDoorButtonsEnabled(enabled){
+  ['btnDoorOpen','btnDoorClose','btnDoorAuto'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.disabled = !enabled;
+  });
+  if(!enabled){
+    const modeEl = document.getElementById('doorModeText');
+    if(modeEl) modeEl.textContent = '—';
+  }
+}
+
+function updateDoorModeUI(mode){
+  const modeEl = document.getElementById('doorModeText');
+  if(modeEl && mode) modeEl.textContent = mode === 'manual' ? 'Manual (from app)' : 'Auto (sensor)';
 }
 
 // Drives the staircase LEDs/beams/speaker/labels straight from the latest rig

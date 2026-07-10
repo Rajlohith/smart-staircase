@@ -11,7 +11,7 @@ import { updateSpiderman } from './spiderman.js';
 import { playNote, announceStep } from './audio.js';
 import { connectPhysical, updatePhysicalVisuals, physicalConnected, physicalData } from './network.js';
 import { logRaw } from './ui-log.js';
-import { initModeToggle, initPhysicalLink, initInstallPrompt } from './ui.js';
+import { initModeToggle, initPhysicalLink, initInstallPrompt, initDoorControls } from './ui.js';
 
 // ---------------------------------------------------------------
 // Center the whole rig for a nicer default orbit target
@@ -74,6 +74,7 @@ document.getElementById('btnSequence').addEventListener('click', playSequence);
 document.getElementById('btnRandom').addEventListener('click', randomStep);
 initModeToggle();
 initPhysicalLink();
+initDoorControls();
 initInstallPrompt();
 
 // ---------------------------------------------------------------

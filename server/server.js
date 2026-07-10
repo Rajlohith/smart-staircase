@@ -6,12 +6,16 @@
 //                                         |
 //                                         `--> Neon Postgres (optional log)
 //
-// Two WebSocket endpoints on the same HTTP server:
+// Two WebSocket endpoints on the same HTTP server, and the link is now
+// TWO-WAY on both of them:
 //   /esp32  — the rig dials into this one (must send a "hello" with the
-//             shared RELAY_TOKEN first, or it's dropped).
+//             shared RELAY_TOKEN first, or it's dropped). Telemetry it sends
+//             is re-broadcast to browsers; commands from browsers (below)
+//             are forwarded down to it.
 //   /ws     — browsers dial into this one; they receive everything the
-//             device sends, re-broadcast verbatim (same JSON shape the
-//             frontend already expects from the LAN mode).
+//             device sends (same JSON shape the frontend already expects
+//             from the LAN mode), and anything a browser sends here (e.g.
+//             {"cmd":"door_open"}) is forwarded straight to the device.
 //
 // Deploy this folder as a Render "Web Service" (Node). See ../README.md
 // for the full step-by-step.
@@ -99,6 +103,21 @@ wssDevice.on('connection', (ws) => {
 wssBrowsers.on('connection', (ws) => {
   browserSockets.add(ws);
   console.log('[relay] browser connected, total:', browserSockets.size);
+
+  // TWO-WAY: forward commands from this browser down to the device, e.g.
+  // {"cmd":"door_open"}. We don't need to understand the payload — just
+  // pass it through — but we do a light shape check so a browser can't
+  // accidentally (or maliciously) push arbitrary junk at the device.
+  ws.on('message', (raw) => {
+    const text = raw.toString();
+    let msg;
+    try { msg = JSON.parse(text); } catch (e) { return; }
+    if (typeof msg.cmd !== 'string') return;
+    if (deviceSocket && deviceSocket.readyState === deviceSocket.OPEN) {
+      deviceSocket.send(text);
+    }
+  });
+
   ws.on('close', () => {
     browserSockets.delete(ws);
     console.log('[relay] browser disconnected, total:', browserSockets.size);

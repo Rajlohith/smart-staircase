@@ -56,6 +56,11 @@ button{
 button:hover{ box-shadow:0 0 18px rgba(33,230,193,.45); transform:translateY(-1px); }
 button.secondary{ background:transparent; color:var(--text); border:1px solid var(--panel-line); }
 button.secondary:hover{ box-shadow:none; border-color:var(--teal); }
+button:disabled{ opacity:.35; cursor:not-allowed; transform:none !important; box-shadow:none !important; }
+
+/* door control row (Physical Rig Link panel) */
+#doorControls{ display:flex; flex-direction:column; gap:0; }
+#doorModeText{ color:var(--text); font-weight:600; }
 
 /* voice/music mode toggle (segmented control) */
 #modeToggle{
