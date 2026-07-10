@@ -30,10 +30,10 @@ const char* password = "viaadamo";
 
 // ---------------- Cloud relay ----------------
 // Set this to your deployed Render service, e.g. "musical-stairs-relay.onrender.com"
-const char* RELAY_HOST = "musical-stairs-relay.onrender.com";
+const char* RELAY_HOST = "smart-staircase.onrender.com";
 const uint16_t RELAY_PORT = 443;         // Render terminates TLS on 443
 const char* RELAY_PATH = "/esp32";       // matches server/server.js's ESP32 endpoint
-const char* RELAY_AUTH_TOKEN = "CHANGE_ME_SHARED_SECRET"; // must match server/.env RELAY_TOKEN
+const char* RELAY_AUTH_TOKEN = "SmartStaircase2026!Relay#987"; // must match server/.env RELAY_TOKEN
 
 WebSocketsClient wsClient;
 bool relayConnected = false;
