@@ -72,7 +72,7 @@ export let doorPivot, hornPivot;
   servoGroup.position.set(
     holeCenterX + holeW/2 + 0.6,      // to the side — against the right jamb edge, by the hinge
     topY + holeBottomY + holeH/2,     // vertically centered on the door's height
-    doorZ                             // flush with the wall/door plane, not front or back
+    doorZ - 1.5                            // flush with the wall/door plane, not front or back
   );
   servoGroup.castShadow = true;
   rig.add(servoGroup);
