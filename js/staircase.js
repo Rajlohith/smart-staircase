@@ -15,10 +15,12 @@ export let speakerMesh, speakerLight, speechLabel;
 export let welcomeLight, welcomeDome;
 export let idleGlowMat, idleLight;
 
-// base landing board (the overhanging platform seen in the physical rig)
+// base landing board — flush with the stair sides, matching the real rig's
+// single continuous flat board (previously overhung the sides by 4cm, which
+// didn't match the physical build)
 const landingDepth = 14;
 const landing = new THREE.Mesh(
-  new THREE.BoxGeometry(STEP_WIDTH+4, TREAD_THICK, landingDepth),
+  new THREE.BoxGeometry(STEP_WIDTH, TREAD_THICK, landingDepth),
   boardEdgeMat
 );
 landing.position.set(0, TREAD_THICK/2, -landingDepth/2 + 0.01);
@@ -221,15 +223,17 @@ rig.add(leftPanel);
   rig.add(speechLabel);
 }
 
-// --- idle/"welcome" ambient glow (strip6 on the real rig) ---
+// --- idle/"welcome" ambient glow (strip6 on the real rig) — mounted along
+// the FRONT edge of the landing, spanning its width, matching the physical
+// build (previously ran along the right side spanning the full depth, which
+// didn't match) ---
 {
-  const runLength = NUM_STEPS*TREAD_DEPTH;
   idleGlowMat = new THREE.MeshStandardMaterial({ color:0x123018, emissive:0x21e6c1, emissiveIntensity:0.9, roughness:0.5 });
-  const idleGlowStrip = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, runLength), idleGlowMat);
-  idleGlowStrip.position.set(STEP_WIDTH/2 + 0.3, 1.2, runLength/2);
+  const idleGlowStrip = new THREE.Mesh(new THREE.BoxGeometry(STEP_WIDTH, 0.4, 0.4), idleGlowMat);
+  idleGlowStrip.position.set(0, TREAD_THICK + 0.3, -landingDepth + 0.35);
   rig.add(idleGlowStrip);
   idleLight = new THREE.PointLight(0x21e6c1, 1.4, 30, 2);
-  idleLight.position.set(STEP_WIDTH/2 + 1.5, 1.5, runLength/2);
+  idleLight.position.set(0, TREAD_THICK + 1.2, -landingDepth + 0.6);
   rig.add(idleLight);
 }
 

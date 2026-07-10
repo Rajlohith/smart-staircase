@@ -170,6 +170,12 @@ when the door opened, etc.) instead of just live data.
 **D. (Optional) check logged history**
 - `https://musical-stairs-relay.onrender.com/api/history` returns the most
   recent events as JSON, straight from Neon.
+- `https://musical-stairs-relay.onrender.com/api/history.csv` downloads
+  **every** logged event as a CSV file (`id, received_at, ldr1, ldr2, ldr3,
+  strip5, strip6, strip7, strip9, speaker`) — one row per received JSON
+  message, ready to open in Excel/Sheets or load into pandas for analytics.
+  Requires `DATABASE_URL` (Neon) to be set; without it, the file just comes
+  back with the header row and no data.
 
 ### If you'd rather have fewer moving parts
 

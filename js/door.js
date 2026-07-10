@@ -53,10 +53,11 @@ export let doorPivot, hornPivot;
   doorPanel.castShadow = true;
   doorPivot.add(doorPanel);
 
-  // SG90-style servo — relocated to the CENTER of the door (x=0) on the BACK
-  // face of the door wall (the +Z side, away from the stairs), and lowered
-  // from its previous near-the-hinge / near-the-top mounting to sit roughly
-  // mid-height of the doorway.
+  // SG90-style servo — mounted on the SIDE jamb of the doorway (the right
+  // edge, next to the hinge), facing sideways into the opening, and
+  // vertically centered on the door's height. Previously this sat flush
+  // against the wall's back face, which didn't match the physical build
+  // (real servo is mounted to the side, not the front/back).
   const servoGroup = new THREE.Group();
   const servoMat = new THREE.MeshStandardMaterial({ color:0x2255aa, roughness:0.4, metalness:0.3 });
   const servoBody = new THREE.Mesh(new THREE.BoxGeometry(1.6,1.6,1.1), servoMat);
@@ -67,10 +68,11 @@ export let doorPivot, hornPivot;
   horn.position.set(-0.75,0,0);
   hornPivot.add(horn);
   servoGroup.add(hornPivot);
+  servoGroup.rotation.y = Math.PI/2; // turn to face sideways, into the opening
   servoGroup.position.set(
-    holeCenterX,                             // centered on the door (was near the hinge edge)
-    topY + holeBottomY + holeH * 0.38,       // brought down from near the top of the hole
-    doorZ + wallThick/2 + 0.55               // back face of the door wall
+    holeCenterX + holeW/2 + 0.6,      // to the side — against the right jamb edge, by the hinge
+    topY + holeBottomY + holeH/2,     // vertically centered on the door's height
+    doorZ                             // flush with the wall/door plane, not front or back
   );
   servoGroup.castShadow = true;
   rig.add(servoGroup);

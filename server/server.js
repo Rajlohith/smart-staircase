@@ -44,6 +44,15 @@ app.get('/api/history', async (req, res) => {
   res.json(rows);
 });
 
+// CSV export of every received JSON payload, for future analytics
+// (Excel/Sheets/pandas, etc): GET /api/history.csv
+app.get('/api/history.csv', async (req, res) => {
+  const csv = await db.allEventsCSV();
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="staircase_events.csv"');
+  res.send(csv);
+});
+
 const wssDevice = new WebSocketServer({ noServer: true });
 const wssBrowsers = new WebSocketServer({ noServer: true });
 
