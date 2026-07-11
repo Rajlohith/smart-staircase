@@ -9,7 +9,7 @@ import {
 import { openDoor, scheduleCloseDoor, updateDoor } from './door.js';
 import { updateSpiderman } from './spiderman.js';
 import { playNote, announceStep } from './audio.js';
-import { connectPhysical, updatePhysicalVisuals, physicalConnected, physicalData } from './network.js';
+import { connectPhysical, updatePhysicalVisuals, physicalConnected, physicalData, sendSimCommand } from './network.js';
 import { logRaw } from './ui-log.js';
 import { initModeToggle, initPhysicalLink, initInstallPrompt, initDoorControls } from './ui.js';
 
@@ -35,6 +35,15 @@ function triggerStep(i){
   playNote(NOTES[i]);
   activeAnims.push({ stepIndex:i, start: clock.getElapsedTime(), duration: 1.3 });
 
+  // TWO-WAY: mirror this click onto the real rig — Uno lights the matching
+  // strip + speaker, and (for step 3 / DOOR_STEP) the servo really opens.
+  // No-op if we're not connected; the virtual animation still runs either way.
+  if(physicalConnected) sendSimCommand(i+1);
+
+  // Whether we announce it here (instantly) or wait for the rig's own
+  // telemetry to echo the step back is decided below, right before the
+  // announceStep(i) call — see the comment there.
+
   // break the laser beam briefly + light receiver indicator + show the label
   const b = beamsByStep[i];
   b.beam.visible = false;
@@ -54,7 +63,13 @@ function triggerStep(i){
   setTimeout(()=>{ speakerMesh.scale.set(1,1,1); }, 160);
   setTimeout(()=>{ speakerLight.intensity = 0; }, 900);
 
-  announceStep(i); // numbers or musical-stairs tune, per the toggle
+  // TWO-WAY: while connected to the rig, don't announce here — the sim
+  // command we just sent will come back around as real telemetry
+  // (ldr1/ldr2/ldr3:true) via the WebSocket in network.js, which announces
+  // it there instead. Announcing in both places is what caused the step to
+  // be spoken twice. When there's no rig connected, this is the only
+  // trigger, so it still announces immediately for the pure-virtual demo.
+  if(!physicalConnected) announceStep(i); // numbers or musical-stairs tune, per the toggle
   logEvent(i);
 
   if(i === DOOR_STEP){

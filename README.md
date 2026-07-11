@@ -126,38 +126,52 @@ internet.
 ## 3. Two-way link — how it works
 
 Before this pass, data only flowed one direction: `Uno → ESP32 → browser`.
-Now the browser can send commands back down the same link, and the ESP32
-reports real door state back up:
+Now the browser can send commands back down the same link, and the rig
+reports real sensor/actuator state back up:
 
 ```
-Browser  --{"cmd":"door_open"}-->  ESP32  --moves real SG90 servo
+Browser  --{"cmd":"door_open"}-->        ESP32  --moves real SG90 servo
+Browser  --{"cmd":"sim","step":1}-->     ESP32  --serial--> Uno  --lights real strip + speaker
 Browser  <--{..sensors, door:"opening", doorMode:"manual"}--  ESP32
 ```
 
-- **Commands** (browser → rig): `{"cmd":"door_open"}`, `{"cmd":"door_close"}`,
-  `{"cmd":"door_auto"}`. Sent as plain WebSocket text frames on the exact
-  same connection used for telemetry — no separate socket needed. `door_open`
-  / `door_close` put the door in **manual** mode (the beam sensor is ignored
-  until you send `door_auto`, which hands control back to LDR3).
+- **Door commands** (browser → rig): `{"cmd":"door_open"}`, `{"cmd":"door_close"}`,
+  `{"cmd":"door_auto"}`. `door_open` / `door_close` put the door in **manual**
+  mode (the beam sensor is ignored until you send `door_auto`, which hands
+  control back to LDR3).
+- **Sim commands** (browser → rig): `{"cmd":"sim","step":1|2|3}`. Sent every
+  time you click/break a laser in the 3D twin (or use Sequence/Random). The
+  ESP32 forwards it to the Uno as a short serial line (`SIM1`/`SIM2`/`SIM3`).
+  The Uno treats that exactly like a real beam-break on that LDR for ~600ms —
+  same strip color, same Talkie voice line, same priority logic as a real
+  footstep — and its next telemetry line reports `ldr3:true` (etc.), which
+  for step 3 the ESP32's existing AUTO-mode door logic turns into a real
+  servo open, automatically. No separate "move servo" command is needed for
+  step 3 — it falls out of the same sensor-driven logic a real footstep uses.
 - **Telemetry** (rig → browser): the existing `{ldr1, ldr2, ldr3, strip5,
-  strip6, strip7, strip9, speaker}` frame now also carries `door` (one of
+  strip6, strip7, strip9, speaker}` frame also carries `door` (one of
   `"closed" | "opening" | "open" | "closing"`, tracking the real servo sweep
-  timing) and `doorMode` (`"auto" | "manual"`). This is sent both right after
-  a new line from the Uno *and* on a 150ms timer, so a door move you trigger
-  with no new sensor data still gets reported back quickly.
-- **Only the door is remote-controllable right now** — it's the one actuator
-  the ESP32 drives independently of the Uno (LEDs/speaker are driven
-  straight off the Uno's own sensor reads, and the Uno sketch is intentionally
-  left unchanged). Extending this pattern to other actuators would mean
-  adding a return serial channel from the ESP32 to the Uno, which is a
-  bigger change to the physical wiring/firmware than this pass makes.
-- **Cloud mode** works the same way: the relay (`server/server.js`) now
-  forwards any `{"cmd":...}` a browser sends on `/ws` straight through to
-  whichever ESP32 is currently connected on `/esp32`, so remote control
-  works from anywhere the site is hosted, not just on the same LAN.
+  timing) and `doorMode` (`"auto" | "manual"`). Sent both right after a new
+  line from the Uno *and* on a 150ms timer, so a door move triggered with no
+  new sensor line still gets reported back quickly.
+- **All three LDR-driven actuators are now remote-controllable** — the Uno
+  sketch listens for `SIM1`/`SIM2`/`SIM3` over the same serial line it already
+  used to talk to the ESP32 (full-duplex UART, so this needed no new wiring
+  beyond what was already connected for the existing Uno→ESP32 link).
+- **Cloud mode works the same way** — this required fixing
+  `esp32_bridge_cloud.ino`, which previously ignored every message the relay
+  sent it (`default: break; // ignore relay->device messages`). It now has
+  the same `handleCommand()`/door-mode/`broadcastState()` logic as the LAN
+  sketch, so commands actually reach the hardware over the internet path too.
+  `server/server.js` forwards any `{"cmd":...}` a browser sends on `/ws`
+  straight through to whichever ESP32 is connected on `/esp32`.
 - **Backwards compatible**: if `door` isn't present in a telemetry frame
   (i.e. you haven't reflashed the ESP32 yet), the frontend quietly falls
   back to the old behavior of inferring open/close purely from `ldr3`.
+- **You must reflash all three boards** for any of this to move real
+  hardware — the Uno sketch, and whichever ESP32 sketch (LAN or cloud) you
+  actually run. Sending commands from a browser to hardware still running
+  the old firmware does nothing, silently.
 
 ---
 

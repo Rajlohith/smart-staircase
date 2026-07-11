@@ -26,6 +26,27 @@ bool lastLdr1 = LOW;
 bool lastLdr2 = LOW;
 bool lastLdr3 = LOW;
 
+// ---- TWO-WAY: virtual -> real sensor simulation ----
+// The ESP32 forwards a short text command ("SIM1"/"SIM2"/"SIM3") whenever
+// someone clicks/breaks that laser in the 3D twin. We treat it exactly like
+// a real beam-break for SIM_HOLD_MS: it ORs into the real digitalRead() below,
+// so every downstream effect (strip color, Talkie voice, the JSON telemetry
+// that goes back up to the ESP32/browser, and — for step 3 — the door/servo
+// logic living on the ESP32) fires exactly as it would for a real footstep,
+// with zero special-casing needed anywhere else in this sketch.
+unsigned long simUntil1 = 0;
+unsigned long simUntil2 = 0;
+unsigned long simUntil3 = 0;
+const unsigned long SIM_HOLD_MS = 600;
+String cmdBuffer = "";
+
+void handleSimCommand(const String& cmd) {
+  unsigned long until = millis() + SIM_HOLD_MS;
+  if (cmd == "SIM1") simUntil1 = until;
+  else if (cmd == "SIM2") simUntil2 = until;
+  else if (cmd == "SIM3") simUntil3 = until;
+}
+
 void setup() {
 
   Serial.begin(115200);
@@ -46,10 +67,22 @@ void setup() {
 
 void loop() {
 
-  // Read sensors
-  bool ldr1 = digitalRead(LDR1_PIN);
-  bool ldr2 = digitalRead(LDR2_PIN);
-  bool ldr3 = digitalRead(LDR3_PIN);
+  // ---- TWO-WAY: drain any SIM commands sent down from the ESP32 ----
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      cmdBuffer.trim();
+      if (cmdBuffer.length() > 0) handleSimCommand(cmdBuffer);
+      cmdBuffer = "";
+    } else if (c != '\r') {
+      cmdBuffer += c;
+    }
+  }
+
+  // Read sensors — real beam-break OR a still-active simulated one
+  bool ldr1 = digitalRead(LDR1_PIN) || (millis() < simUntil1);
+  bool ldr2 = digitalRead(LDR2_PIN) || (millis() < simUntil2);
+  bool ldr3 = digitalRead(LDR3_PIN) || (millis() < simUntil3);
 
   // Speak once when beam is broken
   if (ldr1 == HIGH && lastLdr1 == LOW) {

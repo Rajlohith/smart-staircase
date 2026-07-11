@@ -106,6 +106,27 @@ void handleCommand(const String& text) {
     // door doesn't sit stuck in whatever position the manual command left
     // it in until the next beam-state change.
     if (lastLdr3) startOpening(); else startClosing();
+  } else if (strcmp(cmd, "sim") == 0) {
+    // TWO-WAY: browser clicked/broke a laser in the 3D twin, e.g.
+    // {"cmd":"sim","step":1}. Forward it straight to the Uno, which owns
+    // the LED strips + Talkie speaker and will treat it exactly like a
+    // real beam-break for ~600ms. For step 3 that also means the Uno's
+    // next telemetry line reports ldr3:true, which the AUTO-mode logic
+    // already in loop() below turns into a real servo/door open — no
+    // separate door handling needed here.
+    int step = cmdDoc["step"] | 0;
+    if (step >= 1 && step <= 3) {
+      UnoSerial.print("SIM");
+      UnoSerial.println(step);
+
+      // A virtual footstep on the door step should always be able to open
+      // the door, even if a previous door_open/door_close command left us
+      // stuck in MANUAL mode. Hand control back to the sensor so the
+      // upcoming ldr3:true from the Uno actually opens it.
+      if (step == 3 && doorMode == MODE_MANUAL) {
+        doorMode = MODE_AUTO;
+      }
+    }
   }
 }
 

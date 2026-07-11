@@ -136,6 +136,20 @@ export function sendDoorCommand(cmd){
   logRaw('CMD → rig · ' + cmd);
 }
 
+// ---------------------------------------------------------------
+// VIRTUAL → REAL: clicking/breaking a laser in the 3D twin mirrors it onto
+// the real rig. step is 1-based (1=ldr1, 2=ldr2, 3=ldr3) to match the Uno's
+// SIM1/SIM2/SIM3 command names. The Uno treats it exactly like a real
+// beam-break for ~600ms — lighting the matching strip + speaker itself —
+// and for step 3 that also drives the real servo, via the ESP32's existing
+// AUTO-mode door logic reacting to the ldr3:true it sees come back up.
+// ---------------------------------------------------------------
+export function sendSimCommand(step){
+  if(!ws || ws.readyState !== WebSocket.OPEN) return; // silently skip — demo still runs virtually
+  ws.send(JSON.stringify({ cmd:'sim', step }));
+  logRaw('CMD → rig · sim step ' + step);
+}
+
 function setDoorButtonsEnabled(enabled){
   ['btnDoorOpen','btnDoorClose','btnDoorAuto'].forEach(id=>{
     const el = document.getElementById(id);

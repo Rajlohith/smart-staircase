@@ -168,7 +168,9 @@ spidermanGroup.name = 'SpidermanBlocker';
 }
 
 // Sits on the landing (the "welcome" step — no laser/LDR there) by default.
-const WELCOME_POS = new THREE.Vector3(2.5, 1.0, -6.5);
+// x=0 matches the landing platform's own center (see landing.position.set(0,...)
+// in staircase.js) so he's centered left-right, not offset toward one side.
+const WELCOME_POS = new THREE.Vector3(0, 1.0, -6.5);
 spidermanGroup.position.copy(WELCOME_POS);
 spidermanGroup.scale.setScalar(2.4); // toy-proportioned but visible against the full rig
 rig.add(spidermanGroup);
