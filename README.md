@@ -1,286 +1,478 @@
-# Musical Staircase — Digital Twin
+# Smart Staircase — Digital Twin
 
-A live 3D digital twin (Three.js) of a step-triggered LED + audio staircase,
-with an optional live link to the physical ESP32/Arduino rig.
+A real-time 3D digital twin, built with Three.js, of a physical step-triggered LED and audio staircase. The web application mirrors the state of a physical rig — an Arduino Uno driving LDR beam sensors, WS2812B LED strips, and a speech synthesizer, bridged by an ESP32 that also drives a servo-actuated door — and supports full two-way control: actions performed in the browser can move the real hardware, and the real hardware's state is reflected live in the 3D scene.
 
-## What changed in this pass
+The project runs in three modes with no code changes required between them:
 
-- **Two-way link (virtual ⇄ real)** — the link was previously receive-only
-  (rig → browser). The "Physical Rig Link" panel now has **Open door /
-  Close door / Auto (sensor)** buttons: clicking them sends a command over
-  the same WebSocket to the ESP32, which moves the real SG90 servo directly,
-  overriding the beam sensor until you hit "Auto" again. The ESP32 now also
-  reports the door's real state (`door`, `doorMode`) in every broadcast, on a
-  150ms timer, so the 3D door always mirrors what's actually happening on
-  the rig — whether it moved from your click, the beam sensor, or someone
-  else's browser. Both `esp32_bridge_lan.ino` and `esp32_bridge_cloud.ino`
-  (and the Render relay in `server/`) got matching updates; the frontend
-  falls back to the old ldr3-only behavior automatically if it's still
-  talking to a rig on the older, receive-only firmware. See "Two-way link"
-  below for the message format and wiring details.
-- **Spiderman beam-blocker** — a small chibi Spiderman model (styled off your
-  keychain photos, no keyring/chain) now sits wherever a laser beam is
-  currently broken, so the beam looks like it's being physically blocked
-  instead of vanishing out of nowhere. When nothing is broken, he sits at the
-  bottom landing (the "welcome" area, where there's no laser/LDR at all).
-- **Last riser (with the door) is now half height** — only that riser; the
-  tread above it, the door, and the servo all shift down to sit correctly on
-  top of it.
-- **Servo relocated** — moved to the center of the door, mounted on the back
-  face, and lower than before.
-- **Numbers ⇄ Musical stairs toggle** — a segmented control in the "Simulate"
-  panel switches between the original spoken numbers and a short 3-note tune
-  per step.
-- **Split into a proper file structure** (see below) instead of one 1,000+
-  line `index.html`.
-- **PWA support** — installable on mobile (manifest + service worker + icons).
-- **Offline mode** — a zero-dependency Python static server.
-- **Online hosting** — Firebase Hosting (frontend) + Render (cloud relay) +
-  Neon (Postgres event log), with the reasoning for that split explained
-  below, plus a simpler fallback if you want less moving parts.
+- **Simulation only** — no hardware connected, fully interactive in the browser.
+- **Local network** — the browser and the physical rig communicate directly over WiFi.
+- **Internet-wide** — the rig and any number of browsers communicate through a cloud relay, from anywhere.
 
-## File structure
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Repository Structure](#repository-structure)
+- [Technology Stack](#technology-stack)
+- [Hardware](#hardware)
+- [How the Physical Rig Decides What to Show](#how-the-physical-rig-decides-what-to-show)
+- [Getting Started](#getting-started)
+  - [1. Run the Digital Twin Locally](#1-run-the-digital-twin-locally)
+  - [2. Flash the Microcontrollers](#2-flash-the-microcontrollers)
+- [Two-Way Communication Protocol](#two-way-communication-protocol)
+- [Frontend Application Details](#frontend-application-details)
+- [Cloud Deployment](#cloud-deployment)
+  - [Architecture Rationale](#architecture-rationale)
+  - [Step-by-Step Deployment](#step-by-step-deployment)
+  - [Single-Service Alternative](#single-service-alternative)
+  - [Event History API](#event-history-api)
+- [Progressive Web App](#progressive-web-app)
+- [Visual Design](#visual-design)
+- [Customization](#customization)
+- [Configuration Reference](#configuration-reference)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap Ideas](#roadmap-ideas)
+- [License](#license)
+
+---
+
+## Overview
+
+The Smart Staircase is a physical staircase installation instrumented with laser/LDR beam-break sensors, addressable LED strips, a speaker, and a servo-actuated door. Each of the three steps, when triggered, lights an LED strip in a distinct color, plays either a spoken number or a short musical phrase, and — on the final step — opens a door.
+
+This repository contains the **digital twin** of that installation: a browser-based 3D reconstruction of the staircase that can run entirely standalone as an interactive demo, or connect live to the physical rig so that the virtual and real staircases stay synchronized in both directions.
+
+The project intentionally supports a spectrum of operating conditions, from a laptop with no internet connection at all, to a fully hosted, internet-accessible deployment reachable from any device, anywhere.
+
+---
+
+## Key Features
+
+**3D Simulation**
+- A full Three.js scene of the staircase: risers, treads, closed side-stringer panels, LED strips, laser beams, LDR receiver/transmitter modules, a speaker, and a door with a servo-driven hinge — all built procedurally from primitive geometry, with no external 3D model files.
+- Click any step to simulate a footstep, play a full three-step sequence, or trigger a random footstep.
+- Toggle between spoken step numbers and a short three-note musical phrase per step, matching the physical Talkie voice module and the LED strip layout.
+- A small chibi character model — styled as a laser "beam blocker" — sits wherever a beam is currently broken, so the beam visually appears to be physically obstructed rather than disappearing with no apparent cause. It rests at the entrance landing when no beam is broken, gliding smoothly between positions with a subtle idle bob animation.
+- A free-orbit camera (drag to rotate, scroll to zoom) implemented without any external controls library.
+- An idle "welcome" ambient glow at the landing that dims automatically whenever any step is active, mirroring the physical rig's idle LED strip.
+
+**Two-Way Physical Link**
+- WebSocket connection to the physical rig, either directly over the local network or through a cloud relay, using the same client code path for both.
+- Telemetry flows from the rig to the browser — sensor states, LED strip states, speaker state, door position, and door control mode — and is reflected in the 3D scene in real time, overriding the click-to-simulate demo whenever a live connection is active.
+- Commands flow from the browser to the rig: open the door, close the door, hand door control back to the beam sensor, or simulate any of the three beam-breaks directly on the physical hardware.
+- Automatic reconnection with a fixed retry interval if the link drops.
+- Graceful backward compatibility: if the connected rig is running older firmware that does not report door state, the frontend falls back to inferring the door's position from the step-3 sensor alone.
+
+**Multiple Deployment Modes**
+- **Offline / LAN** — a zero-dependency Python static file server for use with no internet access at all, or for local testing on a shared WiFi network.
+- **Hosted** — Firebase Hosting for the static frontend, a Node.js relay on Render for the cloud bridge to the ESP32, and an optional Neon Postgres database for event history — enabling access from any device, on any network, without port forwarding on the home router.
+
+**Progressive Web App**
+- Installable on Android and iOS via a web app manifest, custom icons, and a service worker that caches the entire application shell for offline use after the first load.
+
+**Event Logging**
+- Every sensor and actuator state change is logged in a live, timestamped, color-coded event panel in the browser, labeling each field as a sensor or an actuator.
+- Optionally, every telemetry frame received by the cloud relay can be persisted to Postgres and exported as CSV for external analysis.
+
+---
+
+## System Architecture
+
+The project has three physical/logical tiers: the microcontrollers on the staircase itself, an optional cloud relay, and the browser-based digital twin.
+
+```
+                     ┌─────────────────────────────┐
+                     │   Physical Staircase Rig     │
+                     │                               │
+                     │  Arduino Uno                  │
+                     │   - 3x LDR beam sensors        │
+                     │   - 4x WS2812B LED strips       │
+                     │   - Talkie speech synth speaker  │
+                     │        │ UART (full-duplex)        │
+                     │        ▼                              │
+                     │  ESP32 bridge                          │
+                     │   - Reads Uno telemetry over serial      │
+                     │   - Drives SG90 door servo                │
+                     │   - Broadcasts state / accepts commands    │
+                     └──────────┬──────────────────────────────┬─┘
+                                │                                │
+                     LAN mode:  │ ws://<esp32-ip>/ws              │  Cloud mode: wss:// out to relay
+                                │                                │
+                                ▼                                ▼
+                     ┌────────────────────┐         ┌─────────────────────────────┐
+                     │   Browser (LAN)      │         │   Cloud Relay (Render)        │
+                     │   Digital Twin app     │         │   Node.js + Express + ws       │
+                     └────────────────────┘         │   /esp32  <- device uplink       │
+                                                      │   /ws     <- browser clients       │
+                                                      │        │                             │
+                                                      │        ▼                             │
+                                                      │   Neon Postgres (optional)             │
+                                                      │   event history log                     │
+                                                      └───────────────┬─────────────────────────┘
+                                                                      │ wss://
+                                                                      ▼
+                                                      ┌─────────────────────────────┐
+                                                      │   Browser (anywhere)          │
+                                                      │   Digital Twin app             │
+                                                      │   Hosted on Firebase Hosting     │
+                                                      └─────────────────────────────┘
+```
+
+Data flows in both directions across every hop: sensor and actuator telemetry moves from the Uno up through the ESP32 and, optionally, the relay, to any connected browser, while door and simulation commands issued in a browser travel back down the same path to move the real servo or trigger the Uno's simulated beam-break handling.
+
+---
+
+## Repository Structure
 
 ```
 digital-twin/
-├── index.html              # markup shell only
-├── manifest.json           # PWA manifest
-├── sw.js                    # service worker (offline caching)
-├── firebase.json            # Firebase Hosting config
-├── .firebaserc               # Firebase project alias (edit this)
-├── serve_offline.py          # run this when there's no internet at all
+├── index.html                    Markup shell for the application
+├── manifest.json                 PWA manifest (icons, theme, display mode)
+├── sw.js                         Service worker for offline asset caching
+├── firebase.json                 Firebase Hosting configuration
+├── .firebaserc                   Firebase project alias
+├── serve_offline.py              Zero-dependency local/offline static server
+├── three.min.js                  Vendored Three.js build (r128)
+├── 404.html                      Fallback page for Firebase Hosting
+│
 ├── css/
-│   └── style.css
+│   └── style.css                 All application styling and theme variables
+│
 ├── js/
-│   ├── config.js             # shared dimensions/constants
-│   ├── scene.js               # scene/camera/renderer/lights/orbit
-│   ├── materials.js
-│   ├── labels.js               # floating canvas-sprite text labels
-│   ├── staircase.js            # builds risers/treads/LEDs/sensors/stringers
-│   ├── door.js                 # door + servo geometry & animation
-│   ├── spiderman.js             # the beam-blocker model + placement logic
-│   ├── audio.js                 # tones, speech, numbers/music toggle
-│   ├── ui-log.js                  # sensor/event log panel
-│   ├── network.js                  # two-way WebSocket link to the physical rig
-│   ├── ui.js                        # button wiring, install prompt
-│   └── main.js                       # entry point / render loop
-├── assets/icons/              # PWA icons (192px, 512px)
+│   ├── config.js                 Shared dimensions and constants (mirrors physical build)
+│   ├── scene.js                  Scene, camera, renderer, lighting, custom orbit controls
+│   ├── materials.js               Shared Three.js materials
+│   ├── labels.js                   Floating canvas-sprite text labels
+│   ├── staircase.js                Builds risers, treads, LED strips, sensors, stringers, speaker
+│   ├── door.js                      Door and servo geometry, open/close animation state machine
+│   ├── spiderman.js                  Beam-blocker character model and placement logic
+│   ├── audio.js                       Tone generation, speech synthesis, numbers/music toggle
+│   ├── ui-log.js                       Live sensor/event log panel
+│   ├── network.js                       Two-way WebSocket client for the physical rig link
+│   ├── ui.js                             Button wiring and PWA install prompt handling
+│   └── main.js                            Application entry point, input handling, render loop
+│
+├── assets/
+│   └── icons/                    PWA icons (192x192, 512x512)
+│
 ├── microcontroller/
 │   ├── arduino_code/
-│   │   └── arduino_code.ino         # Uno sketch — UNCHANGED
+│   │   └── arduino_code.ino      Uno sketch: sensors, LED strips, speech synthesis
 │   ├── esp32_bridge_lan/
-│   │   └── esp32_bridge_lan.ino      # ESP32, LAN-only (your original bridge)
+│   │   └── esp32_bridge_lan.ino  ESP32 firmware for same-network (LAN-only) operation
 │   └── esp32_bridge_cloud/
-│       └── esp32_bridge_cloud.ino     # ESP32, dials out to the Render relay
-└── server/                          # optional cloud relay (for internet hosting)
-    ├── server.js
-    ├── db.js
-    ├── package.json
-    └── .env.example
+│       └── esp32_bridge_cloud.ino ESP32 firmware that dials out to the cloud relay
+│
+└── server/                       Optional cloud relay for internet-wide access
+    ├── server.js                 Express + WebSocket relay server
+    ├── db.js                     Neon Postgres event logging and CSV export
+    ├── package.json               Node.js dependencies and start script
+    └── .env.example                Environment variable template
 ```
 
 ---
 
-## 1. Run it locally first (sanity check)
+## Technology Stack
 
-From the `digital-twin/` folder:
+**Frontend**
+- Vanilla JavaScript using native ES modules — no build step, bundler, or framework required.
+- [Three.js](https://threejs.org/) (r128) for 3D rendering, vendored locally as `three.min.js`.
+- Native WebSocket API for the real-time link to the physical rig.
+- Web Audio API (oscillator-based tone synthesis) and the Speech Synthesis API for spoken announcements.
+- Canvas 2D API for procedurally generated textures (character model face/emblem, floating labels).
+- Web App Manifest and Service Worker API for Progressive Web App support.
+
+**Backend / Relay**
+- [Node.js](https://nodejs.org/) (version 18 or later).
+- [Express](https://expressjs.com/) for HTTP routing and status/history endpoints.
+- [ws](https://github.com/websockets/ws) for WebSocket server functionality.
+- [pg](https://node-postgres.com/) for PostgreSQL connectivity.
+- [dotenv](https://github.com/motdotla/dotenv) for environment variable management.
+
+**Firmware**
+- Arduino Uno sketch using [FastLED](https://fastled.io/) for addressable LED control and [Talkie](https://github.com/going-digital/Talkie) with the US TI99 vocabulary for retro speech synthesis.
+- ESP32 LAN firmware using `WiFi.h`, `AsyncTCP`, `ESPAsyncWebServer`, `ArduinoJson`, and `ESP32Servo`.
+- ESP32 cloud firmware using `WiFi.h`, the `WebSocketsClient` library (WebSockets by Markus Sattler / Links2004), `ArduinoJson`, and `ESP32Servo`.
+
+**Hosting / Infrastructure**
+- [Firebase Hosting](https://firebase.google.com/products/hosting) for the static frontend.
+- [Render](https://render.com/) for the always-on Node.js cloud relay.
+- [Neon](https://neon.tech/) for optional serverless PostgreSQL event history.
+
+---
+
+## Hardware
+
+The physical rig consists of a three-step staircase, each step instrumented identically:
+
+| Component | Role | Location |
+|---|---|---|
+| Laser transmitter | Emits a beam across the tread | Right side of each step |
+| LDR receiver module | Detects when the beam is broken | Left side of each step |
+| WS2812B LED strip | Lights up per riser when its step is triggered | One per riser, plus a dedicated vertical strip on the door wall |
+| Speaker | Plays spoken numbers or musical tones via Talkie | Left wall, beside step 2 |
+| SG90 micro servo | Drives the door open and closed | Side jamb of the doorway at step 3 |
+| Door | Physical barrier that opens on the final step | Top of step 3 |
+
+Signal flow on the rig itself:
+
+- The **Arduino Uno** reads all three LDR sensors on digital pins 2, 4, and 8, drives four WS2812B strips on pins 5, 6, 7, and 9 via FastLED, and produces spoken output via the Talkie library. It sends a compact JSON telemetry line over serial to the ESP32 on a fixed cadence.
+- The **ESP32** reads that serial line on a dedicated hardware UART (RX on GPIO16, TX on GPIO17), forwards it as JSON over WebSocket, and separately owns the SG90 door servo on GPIO18, driving it either automatically off the step-3 sensor or manually off commands received from a browser.
+- The Uno and ESP32 communicate over a full-duplex UART connection, which also carries commands in the opposite direction — browser-triggered simulated beam-breaks — with no additional wiring required beyond the existing serial link.
+
+---
+
+## How the Physical Rig Decides What to Show
+
+The Uno's logic is deliberately simple and priority-based, which the digital twin's live-data rendering mirrors exactly:
+
+1. If step 3's beam (LDR3) is broken, the white strip (Strip 9) lights, regardless of the state of the other two sensors.
+2. Otherwise, if step 2's beam (LDR2) is broken, the red strip (Strip 5) lights.
+3. Otherwise, if step 1's beam (LDR1) is broken, the blue strip (Strip 7) lights.
+4. If no beam is broken, the idle/ambient green strip (Strip 6) lights instead.
+
+Only one of the four strips is ever active at a time on the physical rig. The speaker is considered active whenever any of the three beams is broken. A spoken number ("one", "two", or "three") is triggered once, on the rising edge of its corresponding sensor, whether that edge comes from an actual beam break or from a simulated one sent down from the digital twin. Step 3 additionally drives the door: breaking its beam opens the servo automatically (unless the door has been placed in manual mode from the browser), and the door begins closing after a fixed hold period once the beam clears.
+
+---
+
+## Getting Started
+
+### 1. Run the Digital Twin Locally
+
+From the `digital-twin/` directory:
 
 ```bash
 python3 serve_offline.py
 ```
 
-Then open the printed `http://localhost:8000` in a browser. Click a step,
-try both buttons in the "Announce mode" toggle, and confirm Spiderman sits at
-the landing until you trip a beam.
+Open the printed `http://localhost:8000` address in a browser. Click a step, toggle between the "Numbers" and "Musical stairs" announce modes, and confirm the beam-blocker character sits at the landing until a beam is tripped.
 
-This same script is your **offline mode** — run it on any laptop with no
-internet at all, and any phone/laptop on the same WiFi can open
-`http://<your-computer's-LAN-IP>:8000`. The only internet dependency is the
-one-time load of `three.js` from a CDN; see the comment at the top of
-`serve_offline.py` for how to vendor that file locally for a 100%-offline
-demo, or just let the service worker cache it the first time you have
-internet.
+This same script doubles as the **offline mode**: run it on any machine with no internet connection at all, and any device on the same WiFi network can reach it at `http://<host-machine-LAN-IP>:8000`, including the ESP32's own network. The only external dependency is the one-time load of Three.js from a CDN on first run; see the comment at the top of `serve_offline.py` for instructions on vendoring that file locally for a fully offline demo, or simply allow the service worker to cache it once while internet is available.
 
----
+### 2. Flash the Microcontrollers
 
-## 2. Flash the Arduino / ESP32 (unchanged wiring)
+**Arduino Uno**
+- Flash `microcontroller/arduino_code/arduino_code.ino` as-is. This sketch requires the `FastLED`, `Talkie`, and `Vocab_US_TI99` libraries, available through the Arduino Library Manager.
 
-- `microcontroller/arduino_code/arduino_code.ino` → your Uno, unchanged.
-- For **LAN-only** use (rig and browser on the same WiFi): flash
-  `microcontroller/esp32_bridge_lan/esp32_bridge_lan.ino` — this is your
-  original sketch, untouched. In the app's "Physical Rig Link" panel, type
-  the ESP32's IP and hit Connect.
-- For **internet-wide** access (see architecture below): flash
-  `microcontroller/esp32_bridge_cloud/esp32_bridge_cloud.ino` instead. Before
-  flashing, edit these two lines in that file:
+**ESP32 — choose one variant depending on deployment mode:**
+
+- **LAN-only** (rig and browser share the same WiFi network): flash `microcontroller/esp32_bridge_lan/esp32_bridge_lan.ino`. Update the `ssid` and `password` constants near the top of the file to match your network. In the application's "Physical Rig Link" panel, enter the ESP32's IP address and select Connect.
+- **Internet-wide access** (see [Cloud Deployment](#cloud-deployment)): flash `microcontroller/esp32_bridge_cloud/esp32_bridge_cloud.ino` instead. Before flashing, update the following values in the sketch:
   ```cpp
-  const char* RELAY_HOST = "musical-stairs-relay.onrender.com"; // your Render URL
-  const char* RELAY_AUTH_TOKEN = "CHANGE_ME_SHARED_SECRET";     // must match server/.env
+  const char* RELAY_HOST = "your-relay-name.onrender.com"; // your Render URL
+  const char* RELAY_AUTH_TOKEN = "CHANGE_ME_SHARED_SECRET"; // must match server/.env RELAY_TOKEN
   ```
-  You'll also need the **WebSockets** library by Markus Sattler
-  (Arduino Library Manager → search "WebSockets" → install the one by
-  Links2004).
+  This variant additionally requires the **WebSockets** library by Markus Sattler (search "WebSockets" in the Arduino Library Manager and install the entry by Links2004).
+
+Both ESP32 variants require the `ArduinoJson` and `ESP32Servo` libraries; the LAN variant additionally requires `AsyncTCP` and `ESPAsyncWebServer`.
+
+> Note: the WiFi credentials and the cloud relay hostname/token are hardcoded directly in the `.ino` files rather than pulled from a config file. Update them in the source before flashing, and avoid committing real credentials to a public repository.
 
 ---
 
-## 3. Two-way link — how it works
+## Two-Way Communication Protocol
 
-Before this pass, data only flowed one direction: `Uno → ESP32 → browser`.
-Now the browser can send commands back down the same link, and the rig
-reports real sensor/actuator state back up:
+Telemetry and commands share a single JSON-over-WebSocket connection between the browser and the rig, whether directly on the LAN or via the cloud relay.
 
 ```
-Browser  --{"cmd":"door_open"}-->        ESP32  --moves real SG90 servo
-Browser  --{"cmd":"sim","step":1}-->     ESP32  --serial--> Uno  --lights real strip + speaker
-Browser  <--{..sensors, door:"opening", doorMode:"manual"}--  ESP32
+Browser  --{"cmd":"door_open"}-->         ESP32  moves the real SG90 servo directly
+Browser  --{"cmd":"sim","step":1}-->      ESP32 --serial--> Uno  lights the real strip and speaker
+Browser  <--{...sensors, door, doorMode}--  ESP32
 ```
 
-- **Door commands** (browser → rig): `{"cmd":"door_open"}`, `{"cmd":"door_close"}`,
-  `{"cmd":"door_auto"}`. `door_open` / `door_close` put the door in **manual**
-  mode (the beam sensor is ignored until you send `door_auto`, which hands
-  control back to LDR3).
-- **Sim commands** (browser → rig): `{"cmd":"sim","step":1|2|3}`. Sent every
-  time you click/break a laser in the 3D twin (or use Sequence/Random). The
-  ESP32 forwards it to the Uno as a short serial line (`SIM1`/`SIM2`/`SIM3`).
-  The Uno treats that exactly like a real beam-break on that LDR for ~600ms —
-  same strip color, same Talkie voice line, same priority logic as a real
-  footstep — and its next telemetry line reports `ldr3:true` (etc.), which
-  for step 3 the ESP32's existing AUTO-mode door logic turns into a real
-  servo open, automatically. No separate "move servo" command is needed for
-  step 3 — it falls out of the same sensor-driven logic a real footstep uses.
-- **Telemetry** (rig → browser): the existing `{ldr1, ldr2, ldr3, strip5,
-  strip6, strip7, strip9, speaker}` frame also carries `door` (one of
-  `"closed" | "opening" | "open" | "closing"`, tracking the real servo sweep
-  timing) and `doorMode` (`"auto" | "manual"`). Sent both right after a new
-  line from the Uno *and* on a 150ms timer, so a door move triggered with no
-  new sensor line still gets reported back quickly.
-- **All three LDR-driven actuators are now remote-controllable** — the Uno
-  sketch listens for `SIM1`/`SIM2`/`SIM3` over the same serial line it already
-  used to talk to the ESP32 (full-duplex UART, so this needed no new wiring
-  beyond what was already connected for the existing Uno→ESP32 link).
-- **Cloud mode works the same way** — this required fixing
-  `esp32_bridge_cloud.ino`, which previously ignored every message the relay
-  sent it (`default: break; // ignore relay->device messages`). It now has
-  the same `handleCommand()`/door-mode/`broadcastState()` logic as the LAN
-  sketch, so commands actually reach the hardware over the internet path too.
-  `server/server.js` forwards any `{"cmd":...}` a browser sends on `/ws`
-  straight through to whichever ESP32 is connected on `/esp32`.
-- **Backwards compatible**: if `door` isn't present in a telemetry frame
-  (i.e. you haven't reflashed the ESP32 yet), the frontend quietly falls
-  back to the old behavior of inferring open/close purely from `ldr3`.
-- **You must reflash all three boards** for any of this to move real
-  hardware — the Uno sketch, and whichever ESP32 sketch (LAN or cloud) you
-  actually run. Sending commands from a browser to hardware still running
-  the old firmware does nothing, silently.
+**Door commands** (browser to rig)
+- `{"cmd":"door_open"}` and `{"cmd":"door_close"}` place the door in **manual** mode, in which the beam sensor is ignored until control is handed back.
+- `{"cmd":"door_auto"}` returns control of the door to the step-3 beam sensor, immediately re-evaluating the door's target position against the last known sensor reading rather than waiting for the next sensor change.
+
+**Simulation commands** (browser to rig)
+- `{"cmd":"sim","step":1|2|3}` is sent whenever a step is clicked or a laser is broken in the 3D twin, including during the automated sequence and random-footstep demos.
+- The ESP32 forwards this as a short serial line (`SIM1`, `SIM2`, or `SIM3`) to the Uno, which treats it exactly as it would treat a real beam-break for approximately 600 milliseconds — same LED strip color, same spoken output, same priority logic as an actual footstep.
+- No separate door command is required for step 3: because the Uno's next telemetry line reports LDR3 as tripped, the ESP32's existing automatic door logic opens the servo the same way it would for a real footstep. If the door had been left in manual mode by an earlier command, a step-3 simulation command automatically hands control back to automatic mode so the door can still open.
+
+**Telemetry** (rig to browser)
+- The core sensor/actuator frame — `ldr1`, `ldr2`, `ldr3`, `strip5`, `strip6`, `strip7`, `strip9`, `speaker` — additionally carries `door` (one of `closed`, `opening`, `open`, `closing`, tracking the real servo sweep) and `doorMode` (`auto` or `manual`).
+- This frame is broadcast both immediately after a new line arrives from the Uno, and on a fixed 150 millisecond timer, so that a door movement triggered purely by a browser command — with no accompanying sensor line — is still reported back to all clients promptly.
+- The servo sweep itself is driven by a non-blocking state machine on the ESP32 (`closed` → `opening` → `open` (holding) → `closing` → `closed`), advancing at most one step every few milliseconds, so that reading the Uno's serial line and broadcasting over WebSocket are never blocked by a servo movement in progress.
+
+**Compatibility and reliability**
+- If a connected rig's telemetry does not include a `door` field (older firmware), the frontend falls back automatically to inferring open/closed state purely from `ldr3`.
+- All three boards must be running the versions of firmware described above for two-way commands to move real hardware; sending a command to hardware running older firmware is silently ignored.
+- The browser client automatically attempts to reconnect after a fixed delay on disconnection, and door control buttons in the UI are disabled whenever there is no active connection.
 
 ---
 
-## 4. Hosting online — architecture
+## Frontend Application Details
 
-**Why not just Firebase alone, or just Render alone?** The frontend is a
-static site (Firebase Hosting is perfect and free for that). But the ESP32
-sits behind your home router — nothing on the internet can reach it directly
-without port-forwarding, which most people don't want to set up. So we need
-a small always-on relay the ESP32 can dial *out* to (outbound connections
-work fine through NAT), which then re-broadcasts to any browser. Render is a
-good fit for that always-on Node process. Neon gives you a free serverless
-Postgres if you want to keep a history of events (who tripped which beam,
-when the door opened, etc.) instead of just live data.
+**Scene and camera**
+- The scene uses a dark, fog-tinted background with a key directional light casting shadows, a secondary rim light, ambient fill light, and a faint grid floor for spatial reference.
+- Camera orbit is implemented from scratch (no external controls library): drag to rotate around the staircase, scroll or pinch to zoom, with rotation clamped to a comfortable viewing range.
+
+**Staircase construction**
+- Riser height, tread depth, tread thickness, step width, and step count are all defined in `js/config.js` in centimeters, mirroring the physical build's actual dimensions.
+- The final riser — the one behind which the door sits — is deliberately built at half the height of the other risers, with the tread, door, and servo geometry offset automatically to sit correctly on top of it.
+- Each step gets a matching LDR receiver / laser transmitter pair (receiver on the left, transmitter on the right), a laser beam mesh that disappears when broken, an LED strip along the riser's top edge, and a floating "beam broken" label that appears only while that step is active.
+- Closed side-stringer panels are generated once from a 2D profile that traces the exact step geometry, then extruded and mirrored to close both sides of the staircase.
+
+**Interaction**
+- Clicking or tapping directly on a tread raycasts against the scene and triggers that step exactly as a real footstep would, including sending the corresponding simulation command to a connected rig.
+- A "Play full sequence" button triggers all three steps in order with a short delay between each; a "Random footstep" button triggers one step at random.
+- When a live rig connection is active, the click-to-simulate demo still runs its local animation, but announcement (spoken word or musical phrase) is deferred to the telemetry echo coming back from the rig, to avoid double-announcing the same step.
+
+**Door and beam-blocker animation**
+- The door's open/close animation timing (900 milliseconds) is deliberately matched to the real SG90 servo's actual sweep duration on the physical rig, so the virtual and physical doors move in sync.
+- The beam-blocker character model is built entirely from primitive Three.js geometry (spheres, cylinders, and hand-rolled capsule shapes, since the Three.js version in use predates built-in capsule geometry) plus two small canvas-generated textures, requiring no external 3D assets. It smoothly glides to whichever step's beam is currently broken and returns to the entrance landing when idle.
+
+---
+
+## Cloud Deployment
+
+### Architecture Rationale
+
+The frontend is a static site, for which Firebase Hosting is well suited and free of charge. The ESP32, however, sits behind a home router; nothing on the public internet can reach it directly without port forwarding, which is undesirable for most setups. The solution is a small, always-on relay that the ESP32 dials **out** to — outbound connections traverse NAT without any router configuration — which then re-broadcasts telemetry to any connected browser and forwards commands back down. Render is used for that always-on Node.js process, and Neon provides optional free serverless Postgres for persisting an event history (which beam was tripped, when the door opened, and so on) rather than only exposing live data.
 
 ```
- ESP32 (dials out) --wss--> Render (relay) --wss--> Browser(s) on Firebase Hosting
-                                  |
-                                  `--> Neon Postgres (event history, optional)
+ESP32 (dials out) --wss--> Render (relay) --wss--> Browser(s) on Firebase Hosting
+                                 │
+                                 └──> Neon Postgres (event history, optional)
 ```
 
-### Step-by-step
+### Step-by-Step Deployment
 
-**A. Neon (Postgres) — optional, only if you want event history**
-1. Go to https://neon.tech → sign up → "New Project".
-2. Copy the connection string it gives you (starts with `postgres://...`).
-3. Keep it handy for step B.
+**A. Neon (Postgres) — optional, only required for event history**
+1. Create a project at [neon.tech](https://neon.tech).
+2. Copy the connection string provided (begins with `postgres://`).
+3. Retain it for step B.
 
 **B. Render (the relay)**
-1. Push this whole `digital-twin/` folder to a GitHub repo.
-2. Go to https://render.com → "New +" → "Web Service" → connect your repo.
-3. Set **Root Directory** to `server`.
-4. Build command: `npm install` — Start command: `npm start`.
-5. Add environment variables (Render dashboard → Environment):
-   - `RELAY_TOKEN` = pick a long random string (this is your shared secret —
-     put the same value in `esp32_bridge_cloud.ino`'s `RELAY_AUTH_TOKEN`).
-   - `DATABASE_URL` = the Neon connection string from step A (leave unset to
-     skip history logging entirely — the relay still works fine).
-6. Deploy. Render gives you a URL like
-   `https://musical-stairs-relay.onrender.com`. Put that (without `https://`)
-   into `RELAY_HOST` in `esp32_bridge_cloud.ino` and re-flash the ESP32.
-7. Sanity check: open `https://musical-stairs-relay.onrender.com` in a
-   browser — it should print a plain-text status line.
+1. Push the `digital-twin/` folder to a GitHub repository.
+2. In the Render dashboard, select New → Web Service and connect the repository.
+3. Set the **Root Directory** to `server`.
+4. Set the build command to `npm install` and the start command to `npm start`.
+5. Add the following environment variables:
+   - `RELAY_TOKEN` — a long random string used as a shared secret; this same value must also be set as `RELAY_AUTH_TOKEN` in `esp32_bridge_cloud.ino`.
+   - `DATABASE_URL` — the Neon connection string from step A. Leave unset to run the relay without history logging.
+6. Deploy. Render provides a URL such as `https://your-relay-name.onrender.com`. Enter the hostname portion (without `https://`) as `RELAY_HOST` in `esp32_bridge_cloud.ino` and reflash the ESP32.
+7. Verify the deployment by opening `https://your-relay-name.onrender.com` in a browser; it should return a plain-text status line indicating whether history logging is enabled.
 
 **C. Firebase (the frontend)**
-1. `npm install -g firebase-tools` (one-time).
-2. `firebase login`.
-3. In `digital-twin/`, edit `.firebaserc` — replace
-   `"your-firebase-project-id"` with your actual Firebase project ID (create
-   one free at https://console.firebase.google.com if you don't have one).
-4. From `digital-twin/`, run:
+1. Install the Firebase CLI once: `npm install -g firebase-tools`.
+2. Authenticate: `firebase login`.
+3. In `digital-twin/.firebaserc`, replace the placeholder project ID with an actual Firebase project ID (create one at no cost at the [Firebase console](https://console.firebase.google.com) if needed).
+4. From `digital-twin/`, deploy:
    ```bash
    firebase deploy --only hosting
    ```
-5. Firebase prints your live URL, e.g. `https://your-project.web.app`. Open
-   it — that's your digital twin, live on the internet.
-6. In the app's "Physical Rig Link" field, instead of a LAN IP, type your
-   Render relay's browser endpoint: `wss://musical-stairs-relay.onrender.com/ws`
-   and hit Connect. Live rig data now flows in from anywhere.
+5. Firebase prints a live URL, such as `https://your-project.web.app`.
+6. In the application's "Physical Rig Link" field, instead of a LAN IP address, enter the Render relay's browser endpoint (for example, `wss://your-relay-name.onrender.com/ws`) and select Connect. Live rig data will then flow from anywhere with an internet connection.
 
-**D. (Optional) check logged history**
-- `https://musical-stairs-relay.onrender.com/api/history` returns the most
-  recent events as JSON, straight from Neon.
-- `https://musical-stairs-relay.onrender.com/api/history.csv` downloads
-  **every** logged event as a CSV file (`id, received_at, ldr1, ldr2, ldr3,
-  strip5, strip6, strip7, strip9, speaker`) — one row per received JSON
-  message, ready to open in Excel/Sheets or load into pandas for analytics.
-  Requires `DATABASE_URL` (Neon) to be set; without it, the file just comes
-  back with the header row and no data.
+**D. Optional — reviewing logged history**
+- `GET /api/history` on the relay returns the most recent events as JSON, sourced from Neon.
+- `GET /api/history.csv` downloads every logged event as a CSV file with columns `id, received_at, ldr1, ldr2, ldr3, strip5, strip6, strip7, strip9, speaker`, suitable for spreadsheet applications or further analysis in tools such as pandas. This requires `DATABASE_URL` to be set; without it, the endpoint returns only the header row.
 
-### If you'd rather have fewer moving parts
+### Single-Service Alternative
 
-Render alone can do double duty: serve the static frontend *and* run the
-relay in the same Node process (just add `express.static(__dirname + '/..')`
-in `server.js` and point Render's root directory at the repo root instead of
-`server/`). That collapses it to **just Render + Neon**, one deploy, one URL
-— simpler to operate, at the cost of Render's free tier spinning down after
-inactivity (which adds a ~30s cold-start delay on the first request; Firebase
-Hosting for the static part avoids that entirely, which is why it's split
-out above). Either is a legitimate choice — pick the two-service split if you
-want the frontend always instantly available, or the single-service version
-if you want the least amount of configuration.
+For a deployment with fewer moving parts, Render can serve both the static frontend and the relay from the same Node.js process, by adding static file serving to `server.js` and pointing Render's root directory at the repository root instead of `server/`. This reduces the deployment to Render plus Neon only — one service, one URL — at the cost of Render's free tier spinning down after inactivity, which introduces a cold-start delay of roughly 30 seconds on the first request after idle. The two-service split described above avoids this by keeping the static frontend on Firebase Hosting, which has no equivalent cold start. Either approach is valid; the choice is a trade-off between operational simplicity and consistently instant availability.
+
+### Event History API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | GET | Plain-text relay status, including whether history logging is enabled |
+| `/api/history` | GET | Returns the most recent events as JSON; accepts an optional `?limit=` query parameter (default 100, maximum 500) |
+| `/api/history.csv` | GET | Downloads the complete event history as a CSV file |
+| `/esp32` | WebSocket | Device uplink; requires an initial `hello` message containing the shared `RELAY_TOKEN` |
+| `/ws` | WebSocket | Browser client endpoint; receives telemetry and accepts command messages |
+
+The relay stores events in a single `staircase_events` table (id, received timestamp, and the raw JSON payload), created automatically on first run if `DATABASE_URL` is configured.
 
 ---
 
-## 5. PWA — install on mobile
+## Progressive Web App
 
-Once the site is hosted (Firebase, Render, or even `serve_offline.py` on
-your own WiFi), open it in Chrome/Safari on your phone:
-- **Android/Chrome:** a "⬇ Install app" button appears at the bottom of the
-  screen (or use the browser menu → "Install app" / "Add to Home screen").
-- **iOS/Safari:** Safari doesn't fire the install-prompt button, so use
-  Share → "Add to Home Screen" instead — it'll still install as a
-  standalone app using the same manifest.
+Once the application is hosted — whether via Firebase, Render, or `serve_offline.py` on a local network — it can be installed as a standalone app:
 
-Note: service workers require HTTPS (Firebase/Render both give you this
-automatically) or `localhost` — plain `http://<LAN-IP>` from
-`serve_offline.py` will run everything except the offline-cache part of the
-PWA (the 3D app itself works fine either way).
+- **Android / Chrome**: an in-app "Install app" prompt appears automatically, or it can be triggered manually from the browser menu via "Install app" or "Add to Home screen".
+- **iOS / Safari**: Safari does not surface an automatic install prompt; use the Share menu and select "Add to Home Screen" to install it as a standalone app using the same manifest.
+
+The service worker caches the entire application shell (markup, styles, all JavaScript modules, icons, and the vendored Three.js library) on install, serving cached content first and updating the cache in the background on subsequent loads, so the app continues to function without a network connection once installed. The WebSocket link to the physical rig is never intercepted by the service worker, since it is not a `fetch()`-based request.
+
+Service workers require either HTTPS (provided automatically by both Firebase Hosting and Render) or `localhost`. Accessing the app over plain `http://<LAN-IP>` via `serve_offline.py` will function fully for the 3D application itself, but the offline-caching portion of the PWA will not be available under that configuration.
 
 ---
 
-## 6. Customizing the Spiderman model or its behavior
+## Visual Design
 
-- Look/pose: `js/spiderman.js` — it's built entirely from primitive
-  geometries + two small canvas textures (a web pattern for the head, a
-  spider glyph for the chest), so you can tweak colors, proportions, or pose
-  angles directly without any external model files.
-- Placement logic: `updateSpiderman()` in the same file — it picks the
-  lowest-indexed step whose beam is currently broken (works for both the
-  click-to-simulate demo and the live rig feed) and glides Spiderman to that
-  beam's exact position; otherwise it returns him to the landing.
+The interface uses a dark, technical aesthetic intended to evoke a blueprint or schematic view of the installation:
+
+- A near-black background (`#0a0d13`) with panel surfaces in a slightly lighter tone, subtle borders, and backdrop blur, giving the heads-up-display panels a frosted-glass appearance.
+- A teal accent color (`#21e6c1`) used for primary actions, the idle ambient glow, and monospaced section labels, echoing the color of the physical rig's own idle indicator strip.
+- Per-step LED colors matched exactly to the physical build: blue for step 1, red for step 2, and white for step 3.
+- A monospace typeface for technical labels and log entries, and a system sans-serif typeface for body text and headings.
+- All on-screen panels (title, controls, physical rig link, door controls, component legend, and the event log) are positioned as fixed overlays around the edges of the viewport, leaving the 3D scene itself unobstructed.
+
+---
+
+## Customization
+
+**Beam-blocker character model**
+- Appearance and pose are defined entirely in `js/spiderman.js`, built from primitive Three.js geometries and two small canvas-generated textures, with no external model files required. Colors, proportions, and pose angles can be adjusted directly in this file.
+- Placement logic lives in the `updateSpiderman()` function in the same file. It selects the lowest-indexed step whose beam is currently broken — functioning identically for both the click-to-simulate demo and the live rig feed — and moves the model to that beam's exact position, or returns it to the entrance landing when no beam is broken.
+
+**Staircase dimensions**
+- All physical dimensions are centralized in `js/config.js`, expressed in centimeters to mirror the physical build: step width, tread depth and thickness, riser height, and the number of steps. The final riser is deliberately configured at half the standard riser height, with the tread, door, and servo geometry automatically offset to sit correctly on top of it.
+
+**Announce mode**
+- The choice between spoken step numbers and a short musical phrase per step is implemented in `js/audio.js` and exposed as a segmented control in the "Simulate" panel of the UI.
+
+**Theme and layout**
+- All colors, spacing, and panel positioning are defined as CSS custom properties and rules in `css/style.css`, making the color scheme and HUD layout straightforward to restyle without touching any JavaScript.
+
+---
+
+## Configuration Reference
+
+| File | Purpose |
+|---|---|
+| `js/config.js` | Staircase dimensions, step count, note frequencies, accent color |
+| `.firebaserc` | Firebase project ID used for hosting deployment |
+| `firebase.json` | Firebase Hosting configuration (public directory, ignored files) |
+| `server/.env` | Relay environment variables: `RELAY_TOKEN`, `DATABASE_URL`, `PORT` |
+| `microcontroller/esp32_bridge_lan/esp32_bridge_lan.ino` | WiFi `ssid` / `password` for LAN mode |
+| `microcontroller/esp32_bridge_cloud/esp32_bridge_cloud.ino` | WiFi credentials, `RELAY_HOST`, and `RELAY_AUTH_TOKEN` for cloud mode |
+| `manifest.json` | PWA metadata: name, icons, theme colors, display mode |
+
+---
+
+## Troubleshooting
+
+**The "Physical Rig Link" panel will not connect**
+- Confirm the ESP32 is powered, connected to WiFi, and running firmware matching the intended mode (LAN or cloud).
+- For LAN mode, confirm the browser and the ESP32 are on the same network and that the entered IP address is current (DHCP-assigned addresses can change).
+- For cloud mode, confirm the WebSocket URL begins with `wss://` and points at the relay's `/ws` path, and that the relay is deployed and running.
+
+**Door or LED commands from the browser have no visible effect**
+- Verify both the Uno and the relevant ESP32 sketch have been reflashed with the versions described in this document; hardware running older firmware silently ignores browser-originated commands.
+
+**Cloud relay shows no history**
+- Confirm `DATABASE_URL` is set in the Render environment variables and that the Neon project is active; the relay operates normally without it, simply without persistence.
+
+**Service worker or install prompt not appearing**
+- Confirm the app is being served over HTTPS or `localhost`; plain HTTP over a LAN IP address will not register a service worker.
+
+---
+
+## Roadmap Ideas
+
+- Authentication for the "Physical Rig Link" panel to prevent unauthorized command access on public deployments.
+- A dashboard view over the Neon-backed event history, built directly into the frontend rather than requiring the raw CSV/JSON endpoints.
+- Support for additional steps or fully configurable step counts beyond the current fixed three-step layout.
+- Externalizing WiFi credentials and relay configuration out of the `.ino` source files, so they are not committed to version control in plain text.
+
+---
+
+## License
+
+No license file is currently included in this repository. All rights are reserved by the author unless a license is added.
