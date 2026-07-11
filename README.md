@@ -20,7 +20,7 @@ The project runs in three modes with no code changes required between them:
 - [Hardware](#hardware)
 - [How the Physical Rig Decides What to Show](#how-the-physical-rig-decides-what-to-show)
 - [Getting Started](#getting-started)
-  - [1. Run the Digital Twin Locally](#1-run-the-digital-twin-locally)
+  - [1. Run the Digital Twin Locally](#1-run-the-smart-staircase-locally)
   - [2. Flash the Microcontrollers](#2-flash-the-microcontrollers)
 - [Two-Way Communication Protocol](#two-way-communication-protocol)
 - [Frontend Application Details](#frontend-application-details)
@@ -84,41 +84,57 @@ The project intentionally supports a spectrum of operating conditions, from a la
 The project has three physical/logical tiers: the microcontrollers on the staircase itself, an optional cloud relay, and the browser-based digital twin.
 
 ```
-                     ┌─────────────────────────────┐
-                     │   Physical Staircase Rig     │
-                     │                               │
-                     │  Arduino Uno                  │
-                     │   - 3x LDR beam sensors        │
-                     │   - 4x WS2812B LED strips       │
-                     │   - Talkie speech synth speaker  │
-                     │        │ UART (full-duplex)        │
-                     │        ▼                              │
-                     │  ESP32 bridge                          │
-                     │   - Reads Uno telemetry over serial      │
-                     │   - Drives SG90 door servo                │
-                     │   - Broadcasts state / accepts commands    │
-                     └──────────┬──────────────────────────────┬─┘
-                                │                                │
-                     LAN mode:  │ ws://<esp32-ip>/ws              │  Cloud mode: wss:// out to relay
-                                │                                │
-                                ▼                                ▼
-                     ┌────────────────────┐         ┌─────────────────────────────┐
-                     │   Browser (LAN)      │         │   Cloud Relay (Render)        │
-                     │   Digital Twin app     │         │   Node.js + Express + ws       │
-                     └────────────────────┘         │   /esp32  <- device uplink       │
-                                                      │   /ws     <- browser clients       │
-                                                      │        │                             │
-                                                      │        ▼                             │
-                                                      │   Neon Postgres (optional)             │
-                                                      │   event history log                     │
-                                                      └───────────────┬─────────────────────────┘
-                                                                      │ wss://
-                                                                      ▼
-                                                      ┌─────────────────────────────┐
-                                                      │   Browser (anywhere)          │
-                                                      │   Digital Twin app             │
-                                                      │   Hosted on Firebase Hosting     │
-                                                      └─────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         Physical Staircase Rig                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Arduino Uno                                                                 │
+│   • 3× LDR beam sensors                                                      │
+│   • 4× WS2812B LED strips                                                    │
+│   • Talkie speech synthesizer + speaker                                      │
+│                                                                              │
+│              UART (Full-Duplex Serial)                                       │
+│                        │                                                     │
+│                        ▼                                                     │
+│  ESP32 Bridge                                                                │
+│   • Reads telemetry from Arduino                                             │
+│   • Controls SG90 door servo                                                 │
+│   • Broadcasts state                                                         │
+│   • Accepts remote commands                                                  │
+│                                                                              │
+└───────────────────────────────┬──────────────────────────────────────────────┘
+                                │
+                ┌───────────────┴────────────────┐
+                │                                │
+                │                                │
+          LAN Mode                          Cloud Mode
+                │                                │
+                │                                │
+      ws://<esp32-ip>/ws                 wss://relay-server
+                │                                │
+                ▼                                ▼
+      ┌───────────────────┐         ┌─────────────────────────────────────┐
+      │ Browser           │         │ Cloud Relay (Render)                │
+      │ Digital Twin App  │         ├─────────────────────────────────────┤
+      │ (Local Network)   │         │ Node.js + Express + WebSocket (ws)  │
+      └───────────────────┘         │                                     │
+                                    │ /esp32  ← Device uplink             │
+                                    │ /ws      ← Browser clients          │
+                                    │                                     │
+                                    │ Optional:                           │
+                                    │ Neon PostgreSQL                     │
+                                    │ • Event history                     │
+                                    │ • Logs                              │
+                                    └─────────────────┬───────────────────┘
+                                                      │
+                                                      │  wss://
+                                                      ▼
+                                    ┌─────────────────────────────────────┐
+                                    │ Browser                             │
+                                    │ Digital Twin App                    │
+                                    │ Firebase Hosting                    │
+                                    │ (Accessible from Anywhere)          │
+                                    └─────────────────────────────────────┘
 ```
 
 Data flows in both directions across every hop: sensor and actuator telemetry moves from the Uno up through the ESP32 and, optionally, the relay, to any connected browser, while door and simulation commands issued in a browser travel back down the same path to move the real servo or trigger the Uno's simulated beam-break handling.
@@ -128,49 +144,64 @@ Data flows in both directions across every hop: sensor and actuator telemetry mo
 ## Repository Structure
 
 ```
-digital-twin/
-├── index.html                    Markup shell for the application
-├── manifest.json                 PWA manifest (icons, theme, display mode)
-├── sw.js                         Service worker for offline asset caching
-├── firebase.json                 Firebase Hosting configuration
-├── .firebaserc                   Firebase project alias
-├── serve_offline.py              Zero-dependency local/offline static server
-├── three.min.js                  Vendored Three.js build (r128)
-├── 404.html                      Fallback page for Firebase Hosting
+smart-staircase/
+│
+├── index.html                     # Main application entry point
+├── manifest.json                  # Progressive Web App (PWA) manifest
+├── sw.js                          # Service Worker for offline caching
+├── firebase.json                  # Firebase Hosting configuration
+├── .firebaserc                    # Firebase project alias
+├── serve_offline.py               # Local static server for offline testing
+├── three.min.js                   # Three.js library (r128)
+├── 404.html                       # Firebase fallback page
 │
 ├── css/
-│   └── style.css                 All application styling and theme variables
+│   └── style.css                  # Application styles and theme variables
 │
 ├── js/
-│   ├── config.js                 Shared dimensions and constants (mirrors physical build)
-│   ├── scene.js                  Scene, camera, renderer, lighting, custom orbit controls
-│   ├── materials.js               Shared Three.js materials
-│   ├── labels.js                   Floating canvas-sprite text labels
-│   ├── staircase.js                Builds risers, treads, LED strips, sensors, stringers, speaker
-│   ├── door.js                      Door and servo geometry, open/close animation state machine
-│   ├── spiderman.js                  Beam-blocker character model and placement logic
-│   ├── audio.js                       Tone generation, speech synthesis, numbers/music toggle
-│   ├── ui-log.js                       Live sensor/event log panel
-│   ├── network.js                       Two-way WebSocket client for the physical rig link
-│   ├── ui.js                             Button wiring and PWA install prompt handling
-│   └── main.js                            Application entry point, input handling, render loop
+│   ├── config.js                  # Shared constants and physical dimensions
+│   ├── scene.js                   # Scene, camera, renderer, lighting, controls
+│   ├── materials.js               # Shared Three.js materials
+│   ├── labels.js                  # Canvas-based floating labels
+│   ├── staircase.js               # Staircase, LEDs, sensors, speaker geometry
+│   ├── door.js                    # Door model and servo animation
+│   ├── spiderman.js               # Beam-blocking character model
+│   ├── audio.js                   # Tone generation and speech synthesis
+│   ├── ui-log.js                  # Live telemetry/event log
+│   ├── network.js                 # WebSocket communication layer
+│   ├── ui.js                      # UI controls and PWA install handling
+│   └── main.js                    # Application initialization and render loop
 │
 ├── assets/
-│   └── icons/                    PWA icons (192x192, 512x512)
+│   └── icons/
+│       ├── icon-192.png
+│       └── icon-512.png
 │
 ├── microcontroller/
-│   ├── arduino_code/
-│   │   └── arduino_code.ino      Uno sketch: sensors, LED strips, speech synthesis
-│   ├── esp32_bridge_lan/
-│   │   └── esp32_bridge_lan.ino  ESP32 firmware for same-network (LAN-only) operation
-│   └── esp32_bridge_cloud/
-│       └── esp32_bridge_cloud.ino ESP32 firmware that dials out to the cloud relay
+│   ├── arduino/
+│   │   └── arduino_code.ino       # Arduino Uno firmware
+│   │                               # LDR sensors
+│   │                               # WS2812B LEDs
+│   │                               # Talkie speech synthesizer
+│   │
+│   ├── esp32_lan/
+│   │   └── esp32_bridge_lan.ino    # ESP32 firmware (LAN mode)
+│   │                               # Local WebSocket server
+│   │                               # Servo control
+│   │                               # Arduino serial bridge
+│   │
+│   └── esp32_cloud/
+│       └── esp32_bridge_cloud.ino  # ESP32 firmware (Cloud mode)
+│                                   # Secure WebSocket client
+│                                   # Remote relay connection
+│                                   # Arduino serial bridge
 │
-└── server/                       Optional cloud relay for internet-wide access
-    ├── server.js                 Express + WebSocket relay server
-    ├── db.js                     Neon Postgres event logging and CSV export
-    ├── package.json               Node.js dependencies and start script
-    └── .env.example                Environment variable template
+└── server/
+    ├── server.js                  # Express + WebSocket relay server
+    ├── db.js                      # Neon PostgreSQL logging utilities
+    ├── package.json               # Node.js dependencies
+    ├── .env.example               # Environment variable template
+    └── README.md                  # Server setup instructions
 ```
 
 ---
@@ -242,7 +273,7 @@ Only one of the four strips is ever active at a time on the physical rig. The sp
 
 ### 1. Run the Digital Twin Locally
 
-From the `digital-twin/` directory:
+From the `smart-staircase/` directory:
 
 ```bash
 python3 serve_offline.py
@@ -347,7 +378,7 @@ ESP32 (dials out) --wss--> Render (relay) --wss--> Browser(s) on Firebase Hostin
 3. Retain it for step B.
 
 **B. Render (the relay)**
-1. Push the `digital-twin/` folder to a GitHub repository.
+1. Push the `smart-staircase/` folder to a GitHub repository.
 2. In the Render dashboard, select New → Web Service and connect the repository.
 3. Set the **Root Directory** to `server`.
 4. Set the build command to `npm install` and the start command to `npm start`.
@@ -360,8 +391,8 @@ ESP32 (dials out) --wss--> Render (relay) --wss--> Browser(s) on Firebase Hostin
 **C. Firebase (the frontend)**
 1. Install the Firebase CLI once: `npm install -g firebase-tools`.
 2. Authenticate: `firebase login`.
-3. In `digital-twin/.firebaserc`, replace the placeholder project ID with an actual Firebase project ID (create one at no cost at the [Firebase console](https://console.firebase.google.com) if needed).
-4. From `digital-twin/`, deploy:
+3. In `smart-staircase/.firebaserc`, replace the placeholder project ID with an actual Firebase project ID (create one at no cost at the [Firebase console](https://console.firebase.google.com) if needed).
+4. From `smart-staircase/`, deploy:
    ```bash
    firebase deploy --only hosting
    ```
