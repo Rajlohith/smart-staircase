@@ -1,6 +1,6 @@
 {
-  "name": "Musical Staircase — Digital Twin",
-  "short_name": "Musical Stairs",
+  "name": "Smart Staircase — Digital Twin",
+  "short_name": "Smart Stairs",
   "description": "Live 3D digital twin of a step-triggered LED & audio musical staircase, with an optional live link to the physical rig.",
   "start_url": "./index.html",
   "scope": "./",

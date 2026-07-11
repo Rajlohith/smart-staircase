@@ -1,4 +1,4 @@
-const CACHE_NAME = 'musical-staircase-v2';
+const CACHE_NAME = 'smart-staircase-v2';
 
 const APP_SHELL = [
   './',

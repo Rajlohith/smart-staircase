@@ -1,7 +1,7 @@
 {
-  "name": "musical-stairs-relay",
+  "name": "smart-stairs-relay",
   "version": "1.0.0",
-  "description": "Cloud relay for the Musical Staircase digital twin: bridges the ESP32 rig to browser clients over the internet, and optionally logs events to Neon Postgres.",
+  "description": "Cloud relay for the Smart Staircase digital twin: bridges the ESP32 rig to browser clients over the internet, and optionally logs events to Neon Postgres.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
